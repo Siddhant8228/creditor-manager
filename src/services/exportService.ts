@@ -1,37 +1,34 @@
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+export const exportToCSV = (
+  filename: string,
+  rows: any[]
+) => {
+  if (!rows.length) return;
 
-export function exportOutstandingToExcel(data: any[]) {
-  const worksheet = XLSX.utils.json_to_sheet(data);
+  const headers = Object.keys(rows[0]);
 
-  const workbook = XLSX.utils.book_new();
+  const csvContent = [
+    headers.join(","),
+    ...rows.map((row) =>
+      headers
+        .map((header) => row[header])
+        .join(",")
+    ),
+  ].join("\n");
 
-  XLSX.utils.book_append_sheet(
-    workbook,
-    worksheet,
-    "Outstanding Report"
+  const blob = new Blob(
+    [csvContent],
+    { type: "text/csv;charset=utf-8;" }
   );
 
-  const excelBuffer = XLSX.write(
-    workbook,
-    {
-      bookType: "xlsx",
-      type: "array",
-    }
-  );
+  const link =
+    document.createElement("a");
 
-  const file = new Blob(
-    [excelBuffer],
-    {
-      type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    }
-  );
+  const url =
+    URL.createObjectURL(blob);
 
-  saveAs(
-    file,
-    `Outstanding_Report_${new Date()
-      .toISOString()
-      .split("T")[0]}.xlsx`
-  );
-}
+  link.href = url;
+  link.download =
+    `${filename}.csv`;
+
+  link.click();
+};

@@ -7,6 +7,7 @@ import OutstandingReport from "./pages/OutstandingReport";
 import Suppliers from "./pages/Suppliers";
 import Bills from "./pages/Bills";
 import Payments from "./pages/Payments";
+import Returns from "./pages/Returns";
 
 export default function App() {
   const [currentPage, setCurrentPage] =
@@ -76,7 +77,7 @@ export default function App() {
             </p>
           </div>
         )}
-
+{currentPage === "Returns" && <Returns />}
         {currentPage === "Payments" && (
           <div className="bg-white rounded-xl shadow p-6">
             <h2 className="text-2xl font-bold">

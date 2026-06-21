@@ -8,12 +8,13 @@ export default function Navbar({
 }: NavbarProps) {
  const pages = [
   "Dashboard",
-  "Ledger",
-  "Outstanding Report",
   "Suppliers",
   "Bills",
   "Payments",
-];
+  "Returns",
+  "Ledger",
+  "Outstanding Report",
+  ];
 
   return (
     <div

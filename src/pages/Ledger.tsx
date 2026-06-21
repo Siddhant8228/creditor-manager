@@ -1,54 +1,202 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { getSupplierLedger } from "../services/ledgerService";
-import { generateSupplierStatement } from "../services/pdfService";
+import { exportToCSV } from "../services/exportService";
 
 export default function Ledger() {
-  const [suppliers, setSuppliers] =
-    useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [selectedSupplier, setSelectedSupplier] = useState("");
+  const [entries, setEntries] = useState<any[]>([]);
 
-  const [selectedSupplier, setSelectedSupplier] =
-    useState("");
-
-  const [ledger, setLedger] =
-    useState<any>(null);
+  const [summary, setSummary] = useState({
+    bills: 0,
+    payments: 0,
+    returns: 0,
+    outstanding: 0,
+  });
 
   useEffect(() => {
     loadSuppliers();
   }, []);
 
   const loadSuppliers = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("suppliers")
       .select("*")
       .order("name");
 
+    if (error) {
+      console.error(error);
+      return;
+    }
+
     setSuppliers(data || []);
   };
 
-  const loadLedger = async (
-    supplierId: string
-  ) => {
-    const data =
-      await getSupplierLedger(supplierId);
+  const loadLedger = async (supplierId: string) => {
+    if (!supplierId) {
+      setEntries([]);
+      return;
+    }
 
-    setLedger(data);
+    const { data: bills } = await supabase
+      .from("purchase_bills")
+      .select("*")
+      .eq("supplier_id", supplierId);
+
+    const { data: payments } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("supplier_id", supplierId);
+
+    const { data: returnsData } = await supabase
+      .from("purchase_returns")
+      .select("*")
+      .eq("supplier_id", supplierId);
+
+    const totalBills =
+      bills?.reduce(
+        (sum, bill) => sum + Number(bill.amount),
+        0
+      ) || 0;
+
+    const totalPayments =
+      payments?.reduce(
+        (sum, payment) => sum + Number(payment.amount),
+        0
+      ) || 0;
+
+    const totalReturns =
+      returnsData?.reduce(
+        (sum, ret) => sum + Number(ret.amount),
+        0
+      ) || 0;
+
+    setSummary({
+      bills: totalBills,
+      payments: totalPayments,
+      returns: totalReturns,
+      outstanding:
+        totalBills -
+        totalPayments -
+        totalReturns,
+    });
+
+    const ledger: any[] = [];
+
+    bills?.forEach((bill) => {
+      ledger.push({
+        date: bill.bill_date,
+        type: "Bill",
+        reference: bill.bill_number,
+        debit: Number(bill.amount),
+        credit: 0,
+      });
+    });
+
+    payments?.forEach((payment) => {
+      ledger.push({
+        date: payment.payment_date,
+        type: "Payment",
+        reference:
+          payment.reference_no || "-",
+        debit: 0,
+        credit: Number(payment.amount),
+      });
+    });
+
+    returnsData?.forEach((ret) => {
+      ledger.push({
+        date: ret.return_date,
+        type: "Return",
+        reference:
+          ret.return_number || "-",
+        debit: 0,
+        credit: Number(ret.amount),
+      });
+    });
+
+    ledger.sort(
+      (a, b) =>
+        new Date(a.date).getTime() -
+        new Date(b.date).getTime()
+    );
+
+    let runningBalance = 0;
+
+    const finalLedger = ledger.map((row) => {
+      runningBalance =
+        runningBalance +
+        row.debit -
+        row.credit;
+
+      return {
+        ...row,
+        balance: runningBalance,
+      };
+    });
+
+    setEntries(finalLedger);
   };
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold mb-6">
-        Supplier Ledger
-      </h1>
+    <div
+      style={{
+        padding: "25px",
+        color: "white",
+      }}
+    >
+      <h1>📖 Supplier Ledger</h1>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit,minmax(220px,1fr))",
+          gap: "15px",
+          marginTop: "20px",
+          marginBottom: "20px",
+        }}
+      >
+        <div className="card">
+          <h3>Total Bills</h3>
+          <h2>
+            ₹{summary.bills.toLocaleString()}
+          </h2>
+        </div>
+
+        <div className="card">
+          <h3>Total Payments</h3>
+          <h2>
+            ₹{summary.payments.toLocaleString()}
+          </h2>
+        </div>
+
+        <div className="card">
+          <h3>Total Returns</h3>
+          <h2>
+            ₹{summary.returns.toLocaleString()}
+          </h2>
+        </div>
+
+        <div className="card">
+          <h3>Outstanding</h3>
+          <h2>
+            ₹
+            {summary.outstanding.toLocaleString()}
+          </h2>
+        </div>
+      </div>
 
       <select
-        className="border p-2 rounded"
         value={selectedSupplier}
         onChange={(e) => {
           setSelectedSupplier(
             e.target.value
           );
-          loadLedger(e.target.value);
+
+          loadLedger(
+            e.target.value
+          );
         }}
       >
         <option value="">
@@ -65,111 +213,71 @@ export default function Ledger() {
         ))}
       </select>
 
-      {ledger && (
-        <div className="mt-8">
+      <br />
+      <br />
 
-          <div className="grid grid-cols-3 gap-4 mb-8">
-            <div className="bg-white shadow rounded p-4">
-              <h3>Total Bills</h3>
-              <p className="text-2xl font-bold">
-                ₹{ledger.totalBills.toLocaleString()}
-              </p>
-            </div>
+      <button
+        onClick={() =>
+          exportToCSV(
+            "Ledger_Report",
+            entries
+          )
+        }
+      >
+        📥 Export Ledger
+      </button>
 
-            <div className="bg-white shadow rounded p-4">
-              <h3>Total Payments</h3>
-              <p className="text-2xl font-bold">
-                ₹{ledger.totalPayments.toLocaleString()}
-              </p>
-            </div>
+      <br />
+      <br />
 
-            <div className="bg-white shadow rounded p-4">
-              <h3>Outstanding</h3>
-              <p className="text-2xl font-bold text-red-600">
-                ₹{ledger.outstanding.toLocaleString()}
-              </p>
-            </div>
-          </div>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+        }}
+      >
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Reference</th>
+            <th>Debit</th>
+            <th>Credit</th>
+            <th>Balance</th>
+          </tr>
+        </thead>
 
-          <h2 className="text-xl font-bold">
-            Bills
-          </h2>
+        <tbody>
+          {entries.map(
+            (entry, index) => (
+              <tr key={index}>
+                <td>{entry.date}</td>
 
-          <table className="w-full border mt-2">
-            <thead>
-              <tr>
-                <th>Bill No</th>
-                <th>Date</th>
-                <th>Due Date</th>
-                <th>Amount</th>
+                <td>{entry.type}</td>
+
+                <td>
+                  {entry.reference}
+                </td>
+
+                <td>
+                  ₹
+                  {entry.debit.toLocaleString()}
+                </td>
+
+                <td>
+                  ₹
+                  {entry.credit.toLocaleString()}
+                </td>
+
+                <td>
+                  ₹
+                  {entry.balance.toLocaleString()}
+                </td>
               </tr>
-            </thead>
-
-            <tbody>
-              {ledger.bills.map((bill: any) => (
-                <tr key={bill.id}>
-                  <td>{bill.bill_number}</td>
-                  <td>{bill.bill_date}</td>
-                  <td>{bill.due_date}</td>
-                  <td>
-                    ₹{Number(
-                      bill.amount
-                    ).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h2 className="text-xl font-bold mt-8">
-            Payments
-          </h2>
-
-          <table className="w-full border mt-2">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Mode</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-             <button
-  onClick={() =>
-    generateSupplierStatement(
-      suppliers.find(
-    (s) => s.id === selectedSupplier
-    )?.name || "Supplier",
-      ledger.bills,
-      ledger.payments,
-      ledger.outstanding
-    )
-  }
-  className="bg-blue-600 text-white px-4 py-2 rounded"
->
-  Download Statement PDF
-</button>
-            <tbody>
-              {ledger.payments.map(
-                (payment: any) => (
-                  <tr key={payment.id}>
-                    <td>
-                      {payment.payment_date}
-                    </td>
-                    <td>
-                      {payment.payment_mode}
-                    </td>
-                    <td>
-                      ₹{Number(
-                        payment.amount
-                      ).toLocaleString()}
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+            )
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
